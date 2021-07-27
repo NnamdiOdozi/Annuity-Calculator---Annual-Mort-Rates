@@ -1,0 +1,143 @@
+Function JLGAP_Adj(Age As Integer, Sex As String, AgeS As Integer, SexS As String, SpFrac As Double, AgeRatingM As Integer, _
+AgeRatingF As Integer, MortScalarM As Double, MortScalarF As Double, Guar As Double, interest_r As Double, _
+r_pincs As Double, term_struct As Boolean, m As Integer) As Double
+
+'JLGAP stands for joint life guaranteed annuity with pension increases
+'This version takes the mortaliy tables with the age ratings and mortaoty scalars already applied
+
+'Debug.Print "Start Time: " & Format(Now(), "hh:mm:ss.000")
+
+'Application.Volatile
+
+Const Radix = 17
+Const Tail = 117
+
+
+Dim MaleMortTable As Variant
+Dim pM(Radix To Tail) As Double
+Dim Cum_pM(Radix To Tail) As Double ' defined as the prob of an individual reaching a certain age after buying the annuity
+
+Dim DiscFactor(Radix To Tail) As Double
+Dim PincsFactor(Radix To Tail) As Double
+Dim SLAFilter(Radix To Tail) As Integer
+Dim GuarFilter(Radix To Tail) As Integer
+Dim UnityFilter(Radix To Tail) As Integer
+'Dim BenefitsArray(Radix To Tail) As Double
+
+Dim FemaleMortTable As Variant
+Dim pF(Radix To Tail) As Double
+Dim Cum_pF(Radix To Tail) As Double
+
+Dim p(Radix To Tail) As Double
+Dim pSp(Radix To Tail) As Double
+Dim Cum_p(Radix To Tail) As Double
+Dim Cum_q(Radix To Tail) As Double
+Dim Cum_pSp(Radix To Tail) As Double
+
+
+Dim i As Integer
+Dim j As Integer
+Dim r_term_struct As Variant
+Dim interest_r_m As Double
+Dim net_interest_r As Double
+Dim net_interest_r_m As Double
+Dim SLA As Double
+Dim SPA As Double 'This is the spouse's annuity
+Dim AnnGuar As Double
+Dim MemAnn As Double
+Dim SLAG As Double
+Set wsf = Application.WorksheetFunction
+
+
+ThisWorkbook.Activate
+
+MaleMortTable = Range("PA90M_Adj").Value2
+
+For i = Radix To Tail
+pM(i) = 1 - MaleMortTable(i - Radix + 1, 1)
+UnityFilter(i) = 1
+Next i
+
+FemaleMortTable = Range("PA90F_Adj").Value2
+
+For i = Radix To Tail
+pF(i) = 1 - FemaleMortTable(i - Radix + 1, 1)
+If Sex = "M" Then
+p(i) = pM(i)
+pSp(i) = pF(i)
+Else
+p(i) = pF(i)
+pSp(i) = pM(i)
+
+End If
+Next i
+
+
+Guar = Application.WorksheetFunction.RoundUp(Guar, 0)
+
+'Loading term structure
+'r_term_struct = Application.Transpose(Worksheets("Annuities03122019(Valuation)(d").Range("AnnualSpotRates").Value)
+
+If Sex = "M" Then
+Cum_p(Age) = 1
+Cum_q(Age) = 0
+Cum_pSp(Age) = 1
+Cum_p(Age - 1) = 1
+Cum_pSp(Age - 1) = 1
+End If
+
+If Sex = "F" Then
+Cum_p(Age) = 1
+Cum_q(Age) = 0
+Cum_pSp(Age) = 1
+Cum_p(Age - 1) = 1
+Cum_pSp(Age - 1) = 1
+End If
+
+'Assigning discount and pension increase factors
+DiscFactor(Age) = 1
+PincsFactor(Age) = 1
+
+For i = Age + 1 To Tail
+Cum_p(i) = Cum_p(i - 1) * p(i - 1)
+Cum_q(i) = 1 - Cum_p(i)
+DiscFactor(i) = (1 + interest_r) ^ (Age - i)
+PincsFactor(i) = (1 + r_pincs) ^ (i - Age)
+Next i
+
+
+For i = Age + 1 To Tail
+Cum_pSp(i) = Cum_pSp(i - 1) * pSp(i - 1 - (Age - AgeS)) ' Note that Cum_pSp is on same age index as main life while pSp is on age index of spouse
+Next i
+
+interest_r_m = m * ((1 + interest_r) ^ (1 / m) - 1) 'Deriving the simple annual rate of interest where interest is compounded m times a year
+net_interest_r = (1 + interest_r) / (1 + r_pincs) - 1
+net_interest_r_m = m * ((1 + net_interest_r) ^ (1 / m) - 1)
+
+
+'Single Life Annuity from end of guar period
+For i = Age + Guar To Tail
+SLAFilter(i) = 1
+Next i
+SLA2 = wsf.SumProduct(Cum_p, SLAFilter, PincsFactor, DiscFactor) 'I'm testing my sumproduct code here
+'SLA2 = SLA2 - ((m - 1) / (2 * m)) * (Cum_p(Age + Guar) * (1 + net_interest_r) ^ (-Guar))
+ 
+'Guaranteed part of annuity
+For i = Age To Age + Guar - 1
+GuarFilter(i) = 1
+Next i
+
+AnnGuar2 = wsf.SumProduct(GuarFilter, PincsFactor, DiscFactor) / (1 + interest_r) 'This discount factor at the bottomm is not needed in the monthly version
+AnnGuar2 = AnnGuar2 * (net_interest_r / net_interest_r_m) * ((1 + net_interest_r_m / m) ^ (1)) - r_pincs * (net_interest_r / net_interest_r_m) * ((1 + net_interest_r_m / m) ^ (1))
+
+'Spouse's pension
+If SpFrac <> 0 Then
+SPA2 = SpFrac * wsf.SumProduct(Cum_q, Cum_pSp, PincsFactor, DiscFactor)
+End If
+
+MemAnn = SLA2 + AnnGuar2
+
+JLGAP_Adj = SLA2 + AnnGuar2 + SPA2
+
+'Debug.Print "End Time: " & Format(Now(), "hh:mm:ss.000")
+End Function
